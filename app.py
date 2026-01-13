@@ -11,32 +11,41 @@ from googleapiclient.discovery import build
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Analisis Emosi YouTube IndoBERT", layout="wide")
 
-# --- KUNCI API YOUTUBE ---
-# Disarankan menggunakan st.secrets jika sudah hosting
-YOUTUBE_API_KEY = "YOUTUBE_API_KEY"
+# --- DEBUG INFO ---
+with st.expander("🔍 Debug Info"):
+    st.write("Working directory:", os.getcwd())
+    if os.path.exists("model_save"):
+        st.success("✅ model_save folder exists")
+        for f in os.listdir("model_save"):
+            size = os.path.getsize(os.path.join("model_save", f)) / (1024*1024)
+            st.write(f"- {f}: {size:.2f} MB")
+    else:
+        st.error("❌ model_save not found!")
 
-# --- FUNGSI LOAD MODEL [cite: 191, 194] ---
+# --- KUNCI API YOUTUBE ---
+try:
+    YOUTUBE_API_KEY = st.secrets["YOUTUBE_API_KEY"]
+except:
+    YOUTUBE_API_KEY = "AIzaSyBs9r3BO44zc4aROhhVWq2IXJWKsrByzkU"
+
+# --- FUNGSI LOAD MODEL ---
 @st.cache_resource
 def load_model():
-    model_path = "./model_save"
-    main_bin = f"{model_path}/model.safetensors"
-    
-    if not os.path.exists(main_bin):
-        part_files = sorted([f for f in os.listdir(model_path) if "model.safetensors.part" in f])
-        if part_files:
-            with open(main_bin, 'wb') as outfile:
-                for part in part_files:
-                    with open(os.path.join(model_path, part), 'rb') as infile:
-                        outfile.write(infile.read())
-    
-    tokenizer = BertTokenizer.from_pretrained(model_path)
-    model = BertForSequenceClassification.from_pretrained(model_path)
-    device = torch.device("cpu")
-    model.to(device)
-    model.eval()
-    return tokenizer, model, device
+    try:
+        model_path = "./model_save"
+        tokenizer = BertTokenizer.from_pretrained(model_path)
+        model = BertForSequenceClassification.from_pretrained(model_path)
+        device = torch.device("cpu")
+        model.to(device)
+        model.eval()
+        return tokenizer, model, device
+    except Exception as e:
+        st.error(f"❌ Error loading model: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+        st.stop()
 
-# --- FUNGSI PREDIKSI [cite: 168, 220] ---
+# --- FUNGSI PREDIKSI ---
 def predict_emotion(text, tokenizer, model, device):
     label_dict = {0: 'Senang', 1: 'Sedih', 2: 'Marah', 3: 'Takut', 4: 'Netral'}
     emoji_dict = {0: '😄', 1: '😢', 2: '😡', 3: '😱', 4: '😐'}
@@ -51,7 +60,7 @@ def predict_emotion(text, tokenizer, model, device):
     pred_idx = np.argmax(probs)
     return label_dict[pred_idx], emoji_dict[pred_idx]
 
-# --- FUNGSI SCRAPING DETAIL [cite: 402] ---
+# --- FUNGSI SCRAPING ---
 def get_comments(video_id, max_results=500):
     try:
         youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
@@ -67,17 +76,26 @@ def get_comments(video_id, max_results=500):
                     "Author": snippet['authorDisplayName'],
                     "Img": snippet['authorProfileImageUrl'],
                     "Text": snippet['textDisplay'],
-                    "Likes": snippet.get('likeCount', 0), # Mengambil likeCount
+                    "Likes": snippet.get('likeCount', 0),
                     "Date": snippet['publishedAt']
                 })
             next_page = res.get('nextPageToken')
             if not next_page: break
         return data
-    except: return []
+    except Exception as e:
+        st.error(f"Error getting comments: {e}")
+        return []
 
-# --- UI DASBOR ---
+# --- UI UTAMA ---
 st.title("Analisis Emosi YouTube")
-tokenizer, model, device = load_model()
+
+# Load model
+try:
+    tokenizer, model, device = load_model()
+    st.success("✅ Model berhasil di-load!")
+except:
+    st.error("❌ Gagal load model. Cek debug info di atas.")
+    st.stop()
 
 # Sidebar
 st.sidebar.header("🔍 Filter & Ekspor")
@@ -91,47 +109,54 @@ if st.button("Mulai Analisis", type="primary"):
     v_id = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", url)
     if v_id:
         video_id = v_id.group(1)
-        with st.spinner("Menganalisis data riil..."):
+        st.write(f"📹 Video ID: {video_id}")
+        
+        with st.spinner("Mengambil komentar..."):
             raw = get_comments(video_id, max_results=limit)
         
         if raw:
-            # Hitung statistik
-            counts = {'Senang': 0, 'Sedih': 0, 'Marah': 0, 'Takut': 0, 'Netral': 0}
-            for item in raw:
-                emo, emj = predict_emotion(item['Text'], tokenizer, model, device)
-                item.update({"Emotion": emo, "Emoji": emj})
-                counts[emo] += 1
+            st.success(f"✅ Berhasil ambil {len(raw)} komentar!")
             
-            # --- LAYOUT SEJAJAR KIRI (STATS) & KANAN (VISUALISASI)  ---
+            # Analisis emosi
+            with st.spinner("Menganalisis emosi..."):
+                counts = {'Senang': 0, 'Sedih': 0, 'Marah': 0, 'Takut': 0, 'Netral': 0}
+                for item in raw:
+                    emo, emj = predict_emotion(item['Text'], tokenizer, model, device)
+                    item.update({"Emotion": emo, "Emoji": emj})
+                    counts[emo] += 1
+            
+            # --- LAYOUT STATISTIK & VISUALISASI ---
             st.subheader("📊 Statistik & Visualisasi")
             col_stats, col_viz = st.columns([1, 2])
             
             with col_stats:
-                st.write("**Jumlah Emosi (Potensi)**")
+                st.write("**Jumlah Emosi**")
                 for emo, num in counts.items():
                     st.metric(label=emo, value=num)
             
             with col_viz:
-                tab1, tab2 = st.tabs(["Bar Chart", "Persentase (Pie)"])
+                tab1, tab2 = st.tabs(["Bar Chart", "Pie Chart"])
                 with tab1:
                     st.bar_chart(pd.DataFrame.from_dict(counts, orient='index'))
                 with tab2:
-                    # Matplotlib Pie Chart 
                     fig, ax = plt.subplots(figsize=(6, 6))
                     valid_labels = [k for k, v in counts.items() if v > 0]
                     valid_sizes = [v for v in counts.values() if v > 0]
-                    ax.pie(valid_sizes, labels=valid_labels, autopct='%1.1f%%', startangle=140, colors=['#4CAF50','#2196F3','#F44336','#FF9800','#9E9E9E'])
+                    colors = ['#4CAF50','#2196F3','#F44336','#FF9800','#9E9E9E']
+                    ax.pie(valid_sizes, labels=valid_labels, autopct='%1.1f%%', startangle=140, colors=colors)
                     st.pyplot(fig)
 
-            # --- DETAIL KOMENTAR & SCROLL BOX  ---
+            # --- DETAIL KOMENTAR ---
             st.subheader("💬 Detail Analisis Komentar")
             df = pd.DataFrame(raw)
-            if search: df = df[df['Text'].str.contains(search, case=False)]
-            if emo_filter: df = df[df['Emotion'].isin(emo_filter)]
+            if search: 
+                df = df[df['Text'].str.contains(search, case=False, na=False)]
+            if emo_filter: 
+                df = df[df['Emotion'].isin(emo_filter)]
             
-            st.download_button("📥 Ekspor Hasil ke CSV", df.to_csv(index=False), "analisis_komentar.csv", "text/csv")
+            st.download_button("📥 Ekspor ke CSV", df.to_csv(index=False), "analisis_komentar.csv", "text/csv")
 
-            # Box Scrollable
+            # Scrollable box
             with st.container(height=500):
                 for _, r in df.iterrows():
                     c1, c2 = st.columns([1, 12])
@@ -142,5 +167,7 @@ if st.button("Mulai Analisis", type="primary"):
                         st.write(r['Text'])
                         st.caption(f"Emosi: **{r['Emotion']} {r['Emoji']}** | 👍 {r['Likes']} | 📅 {r['Date']}")
                     st.markdown("---")
+        else:
+            st.error("❌ Tidak ada komentar yang ditemukan!")
     else:
-        st.error("Link YouTube tidak valid.")
+        st.error("❌ Link YouTube tidak valid!")
