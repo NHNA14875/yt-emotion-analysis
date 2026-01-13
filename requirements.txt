@@ -1,0 +1,8 @@
+streamlit
+torch
+transformers
+numpy
+pandas
+google-api-python-client
+safetensors
+matplotlib
