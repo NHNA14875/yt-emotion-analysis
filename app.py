@@ -61,7 +61,7 @@ def predict_emotion(text, tokenizer, model, device):
     return label_dict[pred_idx], emoji_dict[pred_idx]
 
 # --- FUNGSI SCRAPING ---
-def get_comments(video_id, max_results=500):
+def get_comments(video_id, max_results=1000):
     try:
         youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
         data = []
@@ -103,7 +103,7 @@ search = st.sidebar.text_input("Cari kata kunci:")
 emo_filter = st.sidebar.multiselect("Filter Emosi:", ["Senang", "Sedih", "Marah", "Takut", "Netral"])
 
 url = st.text_input("Link Video YouTube:", placeholder="https://www.youtube.com/watch?v=...")
-limit = st.select_slider("Limit Komentar:", options=[50, 100, 250, 500], value=100)
+limit = st.select_slider("Limit Komentar:", options=[50, 100, 250, 500, 1000], value=100)
 
 if st.button("Mulai Analisis", type="primary"):
     v_id = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", url)
